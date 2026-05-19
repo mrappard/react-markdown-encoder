@@ -1,6 +1,8 @@
 {
-  "author": "Espen Hovlandsdal <espen@hovlandsdal.com>",
-  "bugs": "https://github.com/remarkjs/react-markdown/issues",
+  "author": "Matthew Rappard",
+  "bugs": {
+    "url": "https://github.com/matthewrappard/react-markdown-encoder/issues"
+  },
   "contributors": [
     "Alexander Wallin <office@alexanderwallin.com>",
     "Alexander Wong <admin@alexander-wong.com>",
@@ -60,7 +62,7 @@
     "unist-util-visit": "^5.0.0",
     "vfile": "^6.0.0"
   },
-  "description": "React component to render markdown with optional hidden text encoding",
+  "description": "React component to render markdown with optional hidden Unicode text encoding",
   "devDependencies": {
     "@testing-library/react": "^16.0.0",
     "@types/node": "^22.0.0",
@@ -99,11 +101,14 @@
     "ast",
     "commonmark",
     "component",
+    "encoder",
     "gfm",
+    "hidden-text",
     "markdown",
     "react",
     "react-component",
     "remark",
+    "steganography",
     "unified"
   ],
   "license": "MIT",
@@ -129,7 +134,11 @@
       ]
     ]
   },
-  "repository": "remarkjs/react-markdown",
+  "homepage": "https://github.com/matthewrappard/react-markdown-encoder#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/matthewrappard/react-markdown-encoder.git"
+  },
   "scripts": {
     "build": "tsc --build --clean && tsc --build && type-coverage",
     "format": "remark --frail --output --quiet -- . && prettier --log-level warn --write -- . && xo --fix",
@@ -143,7 +152,7 @@
     "strict": true
   },
   "type": "module",
-  "version": "10.1.0",
+  "version": "0.1.0",
   "xo": {
     "envs": [
       "shared-node-browser"

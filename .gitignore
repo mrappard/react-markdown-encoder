@@ -4,6 +4,7 @@
 *.tsbuildinfo
 .DS_Store
 coverage/
+example/
 node_modules/
 react-markdown.min.js
 yarn.lock
