@@ -1,8 +1,9 @@
+/* eslint-disable no-bitwise */
 /* @jsxRuntime automatic @jsxImportSource react */
 /**
  * @import {Root} from 'hast'
  * @import {ComponentProps, ReactNode} from 'react'
- * @import {ExtraProps} from 'react-markdown'
+ * @import {ExtraProps} from 'react-markdown-encoder'
  * @import {Plugin} from 'unified'
  */
 
@@ -24,7 +25,10 @@ import {render, waitFor} from '@testing-library/react'
 import concatStream from 'concat-stream'
 import {Component} from 'react'
 import {renderToPipeableStream, renderToStaticMarkup} from 'react-dom/server'
-import Markdown, {MarkdownAsync, MarkdownHooks} from 'react-markdown'
+import MarkdownEncoder, {
+  MarkdownEncoderAsync,
+  MarkdownEncoderHooks
+} from 'react-markdown-encoder'
 import rehypeRaw from 'rehype-raw'
 import rehypeStarryNight from 'rehype-starry-night'
 import remarkGfm from 'remark-gfm'
@@ -33,82 +37,297 @@ import {visit} from 'unist-util-visit'
 
 const decoder = new TextDecoder()
 
-test('react-markdown (core)', async function (t) {
+/**
+ * @param {string} text
+ *   Text.
+ * @returns {string | undefined}
+ *   Hidden text.
+ */
+function recoverHiddenText(text) {
+  const bytes = extractHiddenBytes(text)
+  const minimumLength = 11
+
+  for (let start = 0; start <= bytes.length - minimumLength; start++) {
+    if (
+      bytes[start] !== 0x56 ||
+      bytes[start + 1] !== 0x53 ||
+      bytes[start + 2] !== 0x52 ||
+      bytes[start + 3] !== 0x31 ||
+      bytes[start + 4] !== 1
+    ) {
+      continue
+    }
+
+    const payloadLength = (bytes[start + 5] << 8) | bytes[start + 6]
+    const payloadStart = start + 7
+    const payloadEnd = payloadStart + payloadLength
+    const blockEnd = payloadEnd + 4
+
+    if (blockEnd > bytes.length) continue
+
+    const expectedCrc =
+      ((bytes[payloadEnd] << 24) >>> 0) |
+      (bytes[payloadEnd + 1] << 16) |
+      (bytes[payloadEnd + 2] << 8) |
+      bytes[payloadEnd + 3]
+    const actualCrc = crc32(bytes.slice(start, payloadEnd))
+
+    if (expectedCrc >>> 0 === actualCrc) {
+      return decoder.decode(bytes.slice(payloadStart, payloadEnd))
+    }
+  }
+}
+
+/**
+ * @param {string} text
+ *   Text.
+ * @returns {Uint8Array}
+ *   Hidden bytes.
+ */
+function extractHiddenBytes(text) {
+  const codePoints = Array.from(text, function (character) {
+    return character.codePointAt(0)
+  })
+  /** @type {Array<number>} */
+  const bytes = []
+
+  for (let index = 0; index < codePoints.length - 1; index++) {
+    const byte = variationSelectorToByte(codePoints[index + 1])
+
+    if (byte !== undefined) {
+      bytes.push(byte)
+      index++
+    }
+  }
+
+  return Uint8Array.from(bytes)
+}
+
+/**
+ * @param {number | undefined} codePoint
+ *   Code point.
+ * @returns {number | undefined}
+ *   Byte.
+ */
+function variationSelectorToByte(codePoint) {
+  if (codePoint === undefined) return
+
+  if (codePoint >= 0xfe_00 && codePoint <= 0xfe_0f) {
+    return codePoint - 0xfe_00
+  }
+
+  if (codePoint >= 0xe_01_00 && codePoint <= 0xe_01_ef) {
+    return 16 + (codePoint - 0xe_01_00)
+  }
+}
+
+const testCrc32Table = new Uint32Array(256)
+
+for (let index = 0; index < testCrc32Table.length; index++) {
+  let value = index
+
+  for (let bit = 0; bit < 8; bit++) {
+    value = value & 1 ? 0xed_b8_83_20 ^ (value >>> 1) : value >>> 1
+  }
+
+  testCrc32Table[index] = value >>> 0
+}
+
+/**
+ * @param {Uint8Array} bytes
+ *   Bytes.
+ * @returns {number}
+ *   CRC32.
+ */
+function crc32(bytes) {
+  let crc = 0xff_ff_ff_ff
+
+  for (const byte of bytes) {
+    crc = testCrc32Table[(crc ^ byte) & 0xff] ^ (crc >>> 8)
+  }
+
+  return (crc ^ 0xff_ff_ff_ff) >>> 0
+}
+
+/**
+ * @param {Array<number>} bytes
+ *   Bytes.
+ * @returns {string}
+ *   Carrier text with hidden bytes.
+ */
+function hideBytes(bytes) {
+  return bytes
+    .map(function (byte) {
+      const selector =
+        byte < 16
+          ? String.fromCodePoint(0xfe_00 + byte)
+          : String.fromCodePoint(0xe_01_00 + byte - 16)
+
+      return 'a' + selector
+    })
+    .join('')
+}
+
+test('react-markdown-encoder (core)', async function (t) {
   await t.test('should expose the public api', async function () {
-    assert.deepEqual(Object.keys(await import('react-markdown')).sort(), [
-      'MarkdownAsync',
-      'MarkdownHooks',
-      'default',
-      'defaultUrlTransform'
-    ])
+    assert.deepEqual(
+      Object.keys(await import('react-markdown-encoder')).sort(),
+      [
+        'MarkdownEncoder',
+        'MarkdownEncoderAsync',
+        'MarkdownEncoderHooks',
+        'default',
+        'defaultUrlTransform'
+      ]
+    )
   })
 })
 
-test('Markdown', async function (t) {
+test('MarkdownEncoder', async function (t) {
   await t.test('should work', function () {
-    assert.equal(renderToStaticMarkup(<Markdown children="a" />), '<p>a</p>')
+    assert.equal(
+      renderToStaticMarkup(<MarkdownEncoder children="a" />),
+      '<p>a</p>'
+    )
   })
+
+  await t.test('should encode hidden text into long elements', function () {
+    const markdown =
+      'This paragraph has enough visible carrier text for the hidden payload.'
+    const markup = renderToStaticMarkup(
+      <MarkdownEncoder children={markdown} text="secret" />
+    )
+
+    assert.equal(recoverHiddenText(markup), 'secret')
+  })
+
+  await t.test(
+    'should replace existing hidden selectors while encoding',
+    function () {
+      const markdown =
+        'T\uFE00h\u{E0100}is paragraph has enough visible carrier text for the hidden payload.'
+      const markup = renderToStaticMarkup(
+        <MarkdownEncoder children={markdown} text="secret" />
+      )
+
+      assert.equal(recoverHiddenText(markup), 'secret')
+    }
+  )
+
+  await t.test(
+    'should skip elements that are too short to encode',
+    function () {
+      assert.equal(
+        renderToStaticMarkup(<MarkdownEncoder children="# a" text="secret" />),
+        '<h1>a</h1>'
+      )
+    }
+  )
+
+  await t.test('should skip elements without text to encode', function () {
+    assert.equal(
+      renderToStaticMarkup(
+        <MarkdownEncoder children="![a](b)" text="secret" />
+      ),
+      '<link rel="preload" as="image" href="b"/><p><img src="b" alt="a"/></p>'
+    )
+  })
+
+  await t.test('should skip void elements while encoding', function () {
+    assert.equal(
+      renderToStaticMarkup(<MarkdownEncoder children="***" text="secret" />),
+      '<hr/>'
+    )
+  })
+
+  await t.test('should reject hidden text that is too large', function () {
+    assert.throws(function () {
+      renderToStaticMarkup(
+        <MarkdownEncoder children="a" text={'a'.repeat(65_536)} />
+      )
+    }, /Unexpected `text` prop/)
+  })
+
+  await t.test(
+    'should ignore invalid hidden data in test recovery',
+    function () {
+      assert.equal(variationSelectorToByte(undefined), undefined)
+      assert.equal(
+        recoverHiddenText(hideBytes(Array.from({length: 11}).fill(0))),
+        undefined
+      )
+      assert.equal(
+        recoverHiddenText(
+          hideBytes([0x56, 0x53, 0x52, 0x31, 1, 0, 10, 0, 0, 0, 0])
+        ),
+        undefined
+      )
+    }
+  )
 
   await t.test('should throw w/ `source`', function () {
     assert.throws(function () {
       // @ts-expect-error: check how the runtime handles untyped `source`.
-      renderToStaticMarkup(<Markdown source="a" />)
+      renderToStaticMarkup(<MarkdownEncoder source="a" />)
     }, /Unexpected `source` prop, use `children` instead/)
   })
 
   await t.test('should throw w/ non-string children (number)', function () {
     assert.throws(function () {
       // @ts-expect-error: check how the runtime handles invalid `children`.
-      renderToStaticMarkup(<Markdown children={1} />)
+      renderToStaticMarkup(<MarkdownEncoder children={1} />)
     }, /Unexpected value `1` for `children` prop, expected `string`/)
   })
 
   await t.test('should throw w/ non-string children (boolean)', function () {
     assert.throws(function () {
       // @ts-expect-error: check how the runtime handles invalid `children`.
-      renderToStaticMarkup(<Markdown children={true} />)
+      renderToStaticMarkup(<MarkdownEncoder children={true} />)
     }, /Unexpected value `true` for `children` prop, expected `string`/)
   })
 
   await t.test('should support `null` as children', function () {
-    assert.equal(renderToStaticMarkup(<Markdown children={null} />), '')
+    assert.equal(renderToStaticMarkup(<MarkdownEncoder children={null} />), '')
   })
 
   await t.test('should support `undefined` as children', function () {
-    assert.equal(renderToStaticMarkup(<Markdown children={undefined} />), '')
+    assert.equal(
+      renderToStaticMarkup(<MarkdownEncoder children={undefined} />),
+      ''
+    )
   })
 
   await t.test('should warn w/ `allowDangerousHtml`', function () {
     assert.throws(function () {
       // @ts-expect-error: check how the runtime handles deprecated `allowDangerousHtml`.
-      renderToStaticMarkup(<Markdown allowDangerousHtml />)
+      renderToStaticMarkup(<MarkdownEncoder allowDangerousHtml />)
     }, /Unexpected `allowDangerousHtml` prop, remove it/)
   })
 
   await t.test('should support a block quote', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="> a" />),
+      renderToStaticMarkup(<MarkdownEncoder children="> a" />),
       '<blockquote>\n<p>a</p>\n</blockquote>'
     )
   })
 
   await t.test('should support a break', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children={'a\\\nb'} />),
+      renderToStaticMarkup(<MarkdownEncoder children={'a\\\nb'} />),
       '<p>a<br/>\nb</p>'
     )
   })
 
   await t.test('should support a code (block, flow; indented)', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="    a" />),
+      renderToStaticMarkup(<MarkdownEncoder children="    a" />),
       '<pre><code>a\n</code></pre>'
     )
   })
 
   await t.test('should support a code (block, flow; fenced)', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children={'```js\na\n```'} />),
+      renderToStaticMarkup(<MarkdownEncoder children={'```js\na\n```'} />),
       '<pre><code class="language-js">a\n</code></pre>'
     )
   })
@@ -116,7 +335,7 @@ test('Markdown', async function (t) {
   await t.test('should support a delete (GFM)', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown children="~a~" remarkPlugins={[remarkGfm]} />
+        <MarkdownEncoder children="~a~" remarkPlugins={[remarkGfm]} />
       ),
       '<p><del>a</del></p>'
     )
@@ -124,7 +343,7 @@ test('Markdown', async function (t) {
 
   await t.test('should support an emphasis', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="*a*" />),
+      renderToStaticMarkup(<MarkdownEncoder children="*a*" />),
       '<p><em>a</em></p>'
     )
   })
@@ -132,7 +351,10 @@ test('Markdown', async function (t) {
   await t.test('should support a footnote (GFM)', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown children={'a[^x]\n\n[^x]: y'} remarkPlugins={[remarkGfm]} />
+        <MarkdownEncoder
+          children={'a[^x]\n\n[^x]: y'}
+          remarkPlugins={[remarkGfm]}
+        />
       ),
       '<p>a<sup><a href="#user-content-fn-x" id="user-content-fnref-x" data-footnote-ref="true" aria-describedby="footnote-label">1</a></sup></p>\n<section data-footnotes="true" class="footnotes"><h2 class="sr-only" id="footnote-label">Footnotes</h2>\n<ol>\n<li id="user-content-fn-x">\n<p>y <a href="#user-content-fnref-x" data-footnote-backref="" aria-label="Back to reference 1" class="data-footnote-backref">↩</a></p>\n</li>\n</ol>\n</section>'
     )
@@ -140,14 +362,14 @@ test('Markdown', async function (t) {
 
   await t.test('should support a heading', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="# a" />),
+      renderToStaticMarkup(<MarkdownEncoder children="# a" />),
       '<h1>a</h1>'
     )
   })
 
   await t.test('should support an html (default)', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="<i>a</i>" />),
+      renderToStaticMarkup(<MarkdownEncoder children="<i>a</i>" />),
       '<p>&lt;i&gt;a&lt;/i&gt;</p>'
     )
   })
@@ -155,7 +377,7 @@ test('Markdown', async function (t) {
   await t.test('should support an html (w/ `rehype-raw`)', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown children="<i>a</i>" rehypePlugins={[rehypeRaw]} />
+        <MarkdownEncoder children="<i>a</i>" rehypePlugins={[rehypeRaw]} />
       ),
       '<p><i>a</i></p>'
     )
@@ -163,7 +385,7 @@ test('Markdown', async function (t) {
 
   await t.test('should support an image', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="![a](b)" />),
+      renderToStaticMarkup(<MarkdownEncoder children="![a](b)" />),
       // Note: React weirdly adds `rel="preload"`.
       '<link rel="preload" as="image" href="b"/><p><img src="b" alt="a"/></p>'
     )
@@ -171,7 +393,7 @@ test('Markdown', async function (t) {
 
   await t.test('should support an image w/ a title', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="![a](b (c))" />),
+      renderToStaticMarkup(<MarkdownEncoder children="![a](b (c))" />),
       // Note: React weirdly adds `rel="preload"`.
       '<link rel="preload" as="image" href="b"/><p><img src="b" alt="a" title="c"/></p>'
     )
@@ -179,7 +401,7 @@ test('Markdown', async function (t) {
 
   await t.test('should support an image reference / definition', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children={'![a]\n\n[a]: b'} />),
+      renderToStaticMarkup(<MarkdownEncoder children={'![a]\n\n[a]: b'} />),
       // Note: React weirdly adds `rel="preload"`.
       '<link rel="preload" as="image" href="b"/><p><img src="b" alt="a"/></p>'
     )
@@ -187,28 +409,28 @@ test('Markdown', async function (t) {
 
   await t.test('should support code (text, inline)', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="`a`" />),
+      renderToStaticMarkup(<MarkdownEncoder children="`a`" />),
       '<p><code>a</code></p>'
     )
   })
 
   await t.test('should support a link', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="[a](b)" />),
+      renderToStaticMarkup(<MarkdownEncoder children="[a](b)" />),
       '<p><a href="b">a</a></p>'
     )
   })
 
   await t.test('should support a link w/ a title', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="[a](b (c))" />),
+      renderToStaticMarkup(<MarkdownEncoder children="[a](b (c))" />),
       '<p><a href="b" title="c">a</a></p>'
     )
   })
 
   await t.test('should support a link reference / definition', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children={'[a]\n\n[a]: b'} />),
+      renderToStaticMarkup(<MarkdownEncoder children={'[a]\n\n[a]: b'} />),
       '<p><a href="b">a</a></p>'
     )
   })
@@ -216,7 +438,7 @@ test('Markdown', async function (t) {
   await t.test('should support prototype poluting identifiers', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children={
             '[][__proto__] [][constructor]\n\n[__proto__]: a\n[constructor]: b'
           }
@@ -228,32 +450,37 @@ test('Markdown', async function (t) {
 
   await t.test('should support duplicate definitions', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children={'[a][]\n\n[a]: b\n[a]: c'} />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children={'[a][]\n\n[a]: b\n[a]: c'} />
+      ),
       '<p><a href="b">a</a></p>'
     )
   })
 
   await t.test('should support a list (unordered) / list item', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="* a" />),
+      renderToStaticMarkup(<MarkdownEncoder children="* a" />),
       '<ul>\n<li>a</li>\n</ul>'
     )
   })
 
   await t.test('should support a list (ordered) / list item', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="1. a" />),
+      renderToStaticMarkup(<MarkdownEncoder children="1. a" />),
       '<ol>\n<li>a</li>\n</ol>'
     )
   })
 
   await t.test('should support a paragraph', function () {
-    assert.equal(renderToStaticMarkup(<Markdown children="a" />), '<p>a</p>')
+    assert.equal(
+      renderToStaticMarkup(<MarkdownEncoder children="a" />),
+      '<p>a</p>'
+    )
   })
 
   await t.test('should support a strong', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="**a**" />),
+      renderToStaticMarkup(<MarkdownEncoder children="**a**" />),
       '<p><strong>a</strong></p>'
     )
   })
@@ -261,7 +488,7 @@ test('Markdown', async function (t) {
   await t.test('should support a table (GFM)', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children={'| a |\n| - |\n| b |'}
           remarkPlugins={[remarkGfm]}
         />
@@ -273,7 +500,7 @@ test('Markdown', async function (t) {
   await t.test('should support a table (GFM; w/ align)', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children={'| a | b | c | d |\n| :- | :-: | -: | - |'}
           remarkPlugins={[remarkGfm]}
         />
@@ -283,82 +510,97 @@ test('Markdown', async function (t) {
   })
 
   await t.test('should support a thematic break', function () {
-    assert.equal(renderToStaticMarkup(<Markdown children="***" />), '<hr/>')
+    assert.equal(
+      renderToStaticMarkup(<MarkdownEncoder children="***" />),
+      '<hr/>'
+    )
   })
 
   await t.test('should support ab absolute path', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="[](/a)" />),
+      renderToStaticMarkup(<MarkdownEncoder children="[](/a)" />),
       '<p><a href="/a"></a></p>'
     )
   })
 
   await t.test('should support an absolute URL', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="[](http://a.com)" />),
+      renderToStaticMarkup(<MarkdownEncoder children="[](http://a.com)" />),
       '<p><a href="http://a.com"></a></p>'
     )
   })
 
   await t.test('should support a URL w/ uppercase protocol', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="[](HTTPS://A.COM)" />),
+      renderToStaticMarkup(<MarkdownEncoder children="[](HTTPS://A.COM)" />),
       '<p><a href="HTTPS://A.COM"></a></p>'
     )
   })
 
   await t.test('should make a `javascript:` URL safe', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="[](javascript:alert(1))" />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="[](javascript:alert(1))" />
+      ),
       '<p><a href=""></a></p>'
     )
   })
 
   await t.test('should make a `vbscript:` URL safe', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="[](vbscript:alert(1))" />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="[](vbscript:alert(1))" />
+      ),
       '<p><a href=""></a></p>'
     )
   })
 
   await t.test('should make a `VBSCRIPT:` URL safe', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="[](VBSCRIPT:alert(1))" />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="[](VBSCRIPT:alert(1))" />
+      ),
       '<p><a href=""></a></p>'
     )
   })
 
   await t.test('should make a `file:` URL safe', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="[](file:///etc/passwd)" />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="[](file:///etc/passwd)" />
+      ),
       '<p><a href=""></a></p>'
     )
   })
 
   await t.test('should allow an empty URL', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="[]()" />),
+      renderToStaticMarkup(<MarkdownEncoder children="[]()" />),
       '<p><a href=""></a></p>'
     )
   })
 
   await t.test('should support search (`?`) in a URL', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="[](a?javascript:alert(1))" />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="[](a?javascript:alert(1))" />
+      ),
       '<p><a href="a?javascript:alert(1)"></a></p>'
     )
   })
 
   await t.test('should support hash (`&`) in a URL', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="[](a?b&c=d)" />),
+      renderToStaticMarkup(<MarkdownEncoder children="[](a?b&c=d)" />),
       '<p><a href="a?b&amp;c=d"></a></p>'
     )
   })
 
   await t.test('should support hash (`#`) in a URL', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="[](a#javascript:alert(1))" />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="[](a#javascript:alert(1))" />
+      ),
       '<p><a href="a#javascript:alert(1)"></a></p>'
     )
   })
@@ -366,7 +608,7 @@ test('Markdown', async function (t) {
   await t.test('should support `urlTransform` (`href` on `a`)', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children="[a](https://b.com 'c')"
           urlTransform={function (url, key, node) {
             assert.equal(url, 'https://b.com')
@@ -383,7 +625,7 @@ test('Markdown', async function (t) {
   await t.test('should support `urlTransform` w/ empty URLs', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children="[]()"
           urlTransform={function (url, key, node) {
             assert.equal(url, '')
@@ -400,7 +642,7 @@ test('Markdown', async function (t) {
   await t.test('should support `urlTransform` (`src` on `img`)', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children="![a](https://b.com 'c')"
           urlTransform={function (url, key, node) {
             assert.equal(url, 'https://b.com')
@@ -416,7 +658,7 @@ test('Markdown', async function (t) {
 
   await t.test('should support `skipHtml`', function () {
     const actual = renderToStaticMarkup(
-      <Markdown children="a<i>b</i>c" skipHtml />
+      <MarkdownEncoder children="a<i>b</i>c" skipHtml />
     )
     assert.equal(actual, '<p>abc</p>')
   })
@@ -426,7 +668,7 @@ test('Markdown', async function (t) {
     function () {
       assert.equal(
         renderToStaticMarkup(
-          <Markdown
+          <MarkdownEncoder
             children={'# *a*\n* b'}
             allowedElements={['h1', 'li', 'ul']}
           />
@@ -439,7 +681,7 @@ test('Markdown', async function (t) {
   await t.test('should support `allowedElements` as a function', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children="*a* **b**"
           allowElement={function (element) {
             return element.tagName !== 'em'
@@ -452,7 +694,7 @@ test('Markdown', async function (t) {
   await t.test('should support `disallowedElements`', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown children={'# *a*\n* b'} disallowedElements={['em']} />
+        <MarkdownEncoder children={'# *a*\n* b'} disallowedElements={['em']} />
       ),
       '<h1></h1>\n<ul>\n<li>b</li>\n</ul>'
     )
@@ -463,7 +705,7 @@ test('Markdown', async function (t) {
     function () {
       assert.throws(function () {
         renderToStaticMarkup(
-          <Markdown
+          <MarkdownEncoder
             children=""
             allowedElements={['p']}
             disallowedElements={['a']}
@@ -478,7 +720,7 @@ test('Markdown', async function (t) {
     function () {
       assert.equal(
         renderToStaticMarkup(
-          <Markdown
+          <MarkdownEncoder
             children="# *a*"
             unwrapDisallowed
             allowedElements={['h1']}
@@ -494,7 +736,7 @@ test('Markdown', async function (t) {
     function () {
       assert.equal(
         renderToStaticMarkup(
-          <Markdown
+          <MarkdownEncoder
             children="# *a*"
             unwrapDisallowed
             disallowedElements={['em']}
@@ -508,7 +750,7 @@ test('Markdown', async function (t) {
   await t.test('should support `remarkRehypeOptions`', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children={'[^x]\n\n[^x]: a\n\n'}
           remarkPlugins={[remarkGfm]}
           remarkRehypeOptions={{clobberPrefix: 'b-'}}
@@ -520,7 +762,9 @@ test('Markdown', async function (t) {
 
   await t.test('should support `components`', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="# a" components={{h1: 'h2'}} />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="# a" components={{h1: 'h2'}} />
+      ),
       '<h2>a</h2>'
     )
   })
@@ -528,7 +772,7 @@ test('Markdown', async function (t) {
   await t.test('should support `components` as functions', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children="a"
           components={{
             p(props) {
@@ -546,7 +790,7 @@ test('Markdown', async function (t) {
   await t.test('should fail on an invalid component', function () {
     assert.throws(function () {
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children="# a"
           components={{
             // @ts-expect-error: check how the runtime handles an invalid component.
@@ -562,7 +806,7 @@ test('Markdown', async function (t) {
 
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children={'# a\n## b'}
           components={{h1: heading, h2: heading}}
         />
@@ -588,7 +832,7 @@ test('Markdown', async function (t) {
     let calls = 0
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children={'```\na\n```\n\n\tb\n\n`c`'}
           components={{
             code(props) {
@@ -612,7 +856,7 @@ test('Markdown', async function (t) {
 
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children={'* [x] a\n1. b'}
           components={{
             li(props) {
@@ -637,7 +881,7 @@ test('Markdown', async function (t) {
 
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children="1. a"
           components={{
             ol(props) {
@@ -661,7 +905,7 @@ test('Markdown', async function (t) {
 
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children="* a"
           components={{
             ul(props) {
@@ -685,7 +929,7 @@ test('Markdown', async function (t) {
 
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children={'|a|\n|-|\n|b|'}
           components={{
             tr(props) {
@@ -711,7 +955,7 @@ test('Markdown', async function (t) {
 
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children={'|a|\n|-|\n|b|'}
           components={{
             td(props) {
@@ -743,7 +987,7 @@ test('Markdown', async function (t) {
     let calls = 0
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children="*a*"
           components={{
             em(props) {
@@ -782,7 +1026,7 @@ test('Markdown', async function (t) {
   await t.test('should support plugins (`remark-gfm`)', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown children="a ~b~ c" remarkPlugins={[remarkGfm]} />
+        <MarkdownEncoder children="a ~b~ c" remarkPlugins={[remarkGfm]} />
       ),
       '<p>a <del>b</del> c</p>'
     )
@@ -791,7 +1035,7 @@ test('Markdown', async function (t) {
   await t.test('should support plugins (`remark-toc`)', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children={'# a\n## Contents\n## b\n### c\n## d'}
           remarkPlugins={[remarkToc]}
         />
@@ -814,7 +1058,9 @@ test('Markdown', async function (t) {
 
   await t.test('should support aria properties', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="c" rehypePlugins={[plugin]} />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="c" rehypePlugins={[plugin]} />
+      ),
       '<input id="a" aria-describedby="b" required=""/><p>c</p>'
     )
 
@@ -836,7 +1082,9 @@ test('Markdown', async function (t) {
 
   await t.test('should support data properties', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="b" rehypePlugins={[plugin]} />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="b" rehypePlugins={[plugin]} />
+      ),
       '<i data-whatever="a"></i><p>b</p>'
     )
 
@@ -858,7 +1106,9 @@ test('Markdown', async function (t) {
 
   await t.test('should support comma separated properties', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="c" rehypePlugins={[plugin]} />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="c" rehypePlugins={[plugin]} />
+      ),
       '<i accept="a, b"></i><p>c</p>'
     )
 
@@ -880,7 +1130,9 @@ test('Markdown', async function (t) {
 
   await t.test('should support `style` properties', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="a" rehypePlugins={[plugin]} />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="a" rehypePlugins={[plugin]} />
+      ),
       '<i style="color:red;font-weight:bold"></i><p>a</p>'
     )
 
@@ -905,7 +1157,7 @@ test('Markdown', async function (t) {
     function () {
       assert.equal(
         renderToStaticMarkup(
-          <Markdown children="a" rehypePlugins={[plugin]} />
+          <MarkdownEncoder children="a" rehypePlugins={[plugin]} />
         ),
         '<i style="-ms-b:1;-webkit-c:2"></i><p>a</p>'
       )
@@ -929,7 +1181,9 @@ test('Markdown', async function (t) {
 
   await t.test('should support broken `style` properties', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="a" rehypePlugins={[plugin]} />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="a" rehypePlugins={[plugin]} />
+      ),
       '<i></i><p>a</p>'
     )
 
@@ -951,7 +1205,9 @@ test('Markdown', async function (t) {
 
   await t.test('should support SVG elements', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="a" rehypePlugins={[plugin]} />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="a" rehypePlugins={[plugin]} />
+      ),
       '<svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg"><title>SVG `&lt;circle&gt;` element</title><circle cx="120" cy="120" r="100"></circle><path stroke-miterlimit="-1"></path></svg><p>a</p>'
     )
 
@@ -997,7 +1253,7 @@ test('Markdown', async function (t) {
   await t.test('should support comments (ignore them)', function () {
     const input = 'a'
     const actual = renderToStaticMarkup(
-      <Markdown children={input} rehypePlugins={[plugin]} />
+      <MarkdownEncoder children={input} rehypePlugins={[plugin]} />
     )
     const expected = '<p>a</p>'
     assert.equal(actual, expected)
@@ -1016,7 +1272,7 @@ test('Markdown', async function (t) {
   await t.test('should support table cells w/ style', function () {
     assert.equal(
       renderToStaticMarkup(
-        <Markdown
+        <MarkdownEncoder
           children={'| a  |\n| :- |'}
           remarkPlugins={[remarkGfm]}
           rehypePlugins={[plugin]}
@@ -1042,7 +1298,9 @@ test('Markdown', async function (t) {
 
   await t.test('should not fail on a plugin replacing `root`', function () {
     assert.equal(
-      renderToStaticMarkup(<Markdown children="a" rehypePlugins={[plugin]} />),
+      renderToStaticMarkup(
+        <MarkdownEncoder children="a" rehypePlugins={[plugin]} />
+      ),
       ''
     )
 
@@ -1058,16 +1316,16 @@ test('Markdown', async function (t) {
   })
 })
 
-test('MarkdownAsync', async function (t) {
-  await t.test('should support `MarkdownAsync` (1)', async function () {
+test('MarkdownEncoderAsync', async function (t) {
+  await t.test('should support `MarkdownEncoderAsync` (1)', async function () {
     assert.throws(function () {
-      renderToStaticMarkup(<MarkdownAsync children={'a'} />)
+      renderToStaticMarkup(<MarkdownEncoderAsync children={'a'} />)
     }, /A component suspended while responding to synchronous input/)
   })
 
-  await t.test('should support `MarkdownAsync` (2)', async function () {
+  await t.test('should support `MarkdownEncoderAsync` (2)', async function () {
     return new Promise(function (resolve, reject) {
-      renderToPipeableStream(<MarkdownAsync children={'a'} />)
+      renderToPipeableStream(<MarkdownEncoderAsync children={'a'} />)
         .pipe(
           concatStream({encoding: 'u8'}, function (data) {
             assert.equal(decoder.decode(data), '<p>a</p>')
@@ -1079,11 +1337,11 @@ test('MarkdownAsync', async function (t) {
   })
 
   await t.test(
-    'should support async plugins w/ `MarkdownAsync` (`rehype-starry-night`)',
+    'should support async plugins w/ `MarkdownEncoderAsync` (`rehype-starry-night`)',
     async function () {
       return new Promise(function (resolve) {
         renderToPipeableStream(
-          <MarkdownAsync
+          <MarkdownEncoderAsync
             children={'```js\nconsole.log(3.14)'}
             rehypePlugins={[rehypeStarryNight]}
           />
@@ -1102,11 +1360,11 @@ test('MarkdownAsync', async function (t) {
 })
 
 // Note: hooks are not supported on the “server”.
-test('MarkdownHooks', async function (t) {
-  await t.test('should support `MarkdownHooks`', async function () {
+test('MarkdownEncoderHooks', async function (t) {
+  await t.test('should support `MarkdownEncoderHooks`', async function () {
     const plugin = deferPlugin()
     const result = render(
-      <MarkdownHooks children={'a'} rehypePlugins={[plugin.plugin]} />
+      <MarkdownEncoderHooks children={'a'} rehypePlugins={[plugin.plugin]} />
     )
 
     assert.equal(result.container.innerHTML, '')
@@ -1121,11 +1379,11 @@ test('MarkdownHooks', async function (t) {
   })
 
   await t.test(
-    'should support async plugins w/ `MarkdownHooks` (`rehype-starry-night`)',
+    'should support async plugins w/ `MarkdownEncoderHooks` (`rehype-starry-night`)',
     async function () {
       const plugin = deferPlugin()
       const result = render(
-        <MarkdownHooks
+        <MarkdownEncoderHooks
           children={'```js\nconsole.log(3.14)'}
           rehypePlugins={[plugin.plugin, rehypeStarryNight]}
         />
@@ -1149,7 +1407,7 @@ test('MarkdownHooks', async function (t) {
   await t.test('should support `fallback`', async function () {
     const plugin = deferPlugin()
     const result = render(
-      <MarkdownHooks
+      <MarkdownEncoderHooks
         children={'a'}
         fallback="Loading"
         rehypePlugins={[plugin.plugin]}
@@ -1171,7 +1429,7 @@ test('MarkdownHooks', async function (t) {
     const plugin = deferPlugin()
     const result = render(
       <ErrorBoundary>
-        <MarkdownHooks children={'a'} rehypePlugins={[plugin.plugin]} />
+        <MarkdownEncoderHooks children={'a'} rehypePlugins={[plugin.plugin]} />
       </ErrorBoundary>
     )
 
@@ -1195,13 +1453,13 @@ test('MarkdownHooks', async function (t) {
     const pluginB = deferPlugin()
 
     const result = render(
-      <MarkdownHooks children={'a'} rehypePlugins={[pluginA.plugin]} />
+      <MarkdownEncoderHooks children={'a'} rehypePlugins={[pluginA.plugin]} />
     )
 
     assert.equal(result.container.innerHTML, '')
 
     result.rerender(
-      <MarkdownHooks children={'b'} rehypePlugins={[pluginB.plugin]} />
+      <MarkdownEncoderHooks children={'b'} rehypePlugins={[pluginB.plugin]} />
     )
 
     assert.equal(result.container.innerHTML, '')

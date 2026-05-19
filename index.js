@@ -8,8 +8,9 @@
  */
 
 export {
-  MarkdownAsync,
-  MarkdownHooks,
-  Markdown as default,
+  MarkdownEncoder,
+  MarkdownEncoderAsync,
+  MarkdownEncoderHooks,
+  MarkdownEncoder as default,
   defaultUrlTransform
 } from './lib/index.js'

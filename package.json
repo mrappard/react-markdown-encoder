@@ -60,7 +60,7 @@
     "unist-util-visit": "^5.0.0",
     "vfile": "^6.0.0"
   },
-  "description": "React component to render markdown",
+  "description": "React component to render markdown with optional hidden text encoding",
   "devDependencies": {
     "@testing-library/react": "^16.0.0",
     "@types/node": "^22.0.0",
@@ -107,7 +107,7 @@
     "unified"
   ],
   "license": "MIT",
-  "name": "react-markdown",
+  "name": "react-markdown-encoder",
   "peerDependencies": {
     "@types/react": ">=18",
     "react": ">=18"
@@ -149,6 +149,9 @@
       "shared-node-browser"
     ],
     "extends": "plugin:react/jsx-runtime",
+    "ignores": [
+      "example/**"
+    ],
     "overrides": [
       {
         "files": [
