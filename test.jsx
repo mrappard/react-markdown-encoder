@@ -3,7 +3,7 @@
 /**
  * @import {Root} from 'hast'
  * @import {ComponentProps, ReactNode} from 'react'
- * @import {ExtraProps} from 'react-markdown-encoder'
+ * @import {ExtraProps} from './index.js'
  * @import {Plugin} from 'unified'
  */
 
@@ -25,15 +25,15 @@ import {render, waitFor} from '@testing-library/react'
 import concatStream from 'concat-stream'
 import {Component} from 'react'
 import {renderToPipeableStream, renderToStaticMarkup} from 'react-dom/server'
-import MarkdownEncoder, {
-  MarkdownEncoderAsync,
-  MarkdownEncoderHooks
-} from 'react-markdown-encoder'
 import rehypeRaw from 'rehype-raw'
 import rehypeStarryNight from 'rehype-starry-night'
 import remarkGfm from 'remark-gfm'
 import remarkToc from 'remark-toc'
 import {visit} from 'unist-util-visit'
+import MarkdownEncoder, {
+  MarkdownEncoderAsync,
+  MarkdownEncoderHooks
+} from './index.js'
 
 const decoder = new TextDecoder()
 
@@ -170,16 +170,13 @@ function hideBytes(bytes) {
 
 test('react-markdown-encoder (core)', async function (t) {
   await t.test('should expose the public api', async function () {
-    assert.deepEqual(
-      Object.keys(await import('react-markdown-encoder')).sort(),
-      [
-        'MarkdownEncoder',
-        'MarkdownEncoderAsync',
-        'MarkdownEncoderHooks',
-        'default',
-        'defaultUrlTransform'
-      ]
-    )
+    assert.deepEqual(Object.keys(await import('./index.js')).sort(), [
+      'MarkdownEncoder',
+      'MarkdownEncoderAsync',
+      'MarkdownEncoderHooks',
+      'default',
+      'defaultUrlTransform'
+    ])
   })
 })
 

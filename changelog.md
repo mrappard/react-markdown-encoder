@@ -4,7 +4,7 @@
 
 All notable changes will be documented in this file.
 
-## react-markdown-encoder 0.1.0 - unreleased
+## react-markdown-encoder 0.1.1 - 2026-05-20
 
 * Fork from [`remarkjs/react-markdown`](https://github.com/remarkjs/react-markdown)
   as a new package named `react-markdown-encoder`.
@@ -12,6 +12,8 @@ All notable changes will be documented in this file.
   public component names.
 * Add optional hidden Unicode text encoding through the `text` prop.
 * Skip rendered elements that are too short or do not contain text carriers.
+* Bundle the published package entry for package-manager link workflows and
+  avoid Node-specific imports in browser-oriented bundlers.
 
 ## Upstream react-markdown history
 

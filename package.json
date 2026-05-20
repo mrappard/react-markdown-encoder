@@ -6,7 +6,6 @@
   "dependencies": {
     "@types/hast": "^3.0.0",
     "@types/mdast": "^4.0.0",
-    "devlop": "^1.0.0",
     "hast-util-to-jsx-runtime": "^2.0.0",
     "html-url-attributes": "^3.0.0",
     "mdast-util-to-hast": "^13.0.0",
@@ -40,8 +39,15 @@
     "typescript": "^5.0.0",
     "xo": "^0.60.0"
   },
-  "exports": "./index.js",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "files": [
+    "dist/index.js",
     "index.d.ts.map",
     "index.d.ts",
     "index.js",
@@ -62,6 +68,7 @@
     "unified"
   ],
   "license": "MIT",
+  "main": "./dist/index.js",
   "name": "react-markdown-encoder",
   "peerDependencies": {
     "@types/react": ">=18",
@@ -90,8 +97,10 @@
     "url": "git+https://github.com/matthewrappard/react-markdown-encoder.git"
   },
   "scripts": {
-    "build": "tsc --build --clean && tsc --build && type-coverage",
+    "build": "tsc --build --clean && tsc --build && npm run build:bundle && type-coverage",
+    "build:bundle": "esbuild index.js --bundle --format=esm --platform=neutral --main-fields=module,main --conditions=default --external:react --external:react/jsx-runtime --outfile=dist/index.js",
     "format": "remark --frail --output --quiet -- . && prettier --log-level warn --write -- . && xo --fix",
+    "prepack": "npm run build",
     "test-api": "node --conditions development --experimental-loader=./script/load-jsx.js --no-warnings test.jsx",
     "test-coverage": "c8 --100 --exclude script/ --reporter lcov -- npm run test-api",
     "test": "npm run build && npm run format && npm run test-coverage"
@@ -103,13 +112,14 @@
   },
   "type": "module",
   "types": "./index.d.ts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "xo": {
     "envs": [
       "shared-node-browser"
     ],
     "extends": "plugin:react/jsx-runtime",
     "ignores": [
+      "dist/**",
       "example/**"
     ],
     "overrides": [

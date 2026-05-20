@@ -23,6 +23,32 @@ Unicode variation selectors.
 npm install react-markdown-encoder
 ```
 
+## Local Testing
+
+When testing with `yalc`, publish the package and then run your package manager
+in the consuming app so runtime dependencies are installed there:
+
+```sh
+# in react-markdown-encoder
+yalc publish
+
+# in the consuming app
+yalc add react-markdown-encoder
+npm install
+```
+
+If you update this package, run:
+
+```sh
+# in react-markdown-encoder
+yalc push
+
+# in the consuming app
+npm install
+```
+
+Restart the consuming app’s dev server after updating the yalc package.
+
 ## Use
 
 Render markdown:
