@@ -3,52 +3,6 @@
   "bugs": {
     "url": "https://github.com/matthewrappard/react-markdown-encoder/issues"
   },
-  "contributors": [
-    "Alexander Wallin <office@alexanderwallin.com>",
-    "Alexander Wong <admin@alexander-wong.com>",
-    "André Staltz <andre@staltz.com>",
-    "Angus MacIsaac <angus.macisaac@busbud.com>",
-    "Beau Roberts <beau.roberts@autodesk.com>",
-    "Charlie Chen <doveccl@live.com>",
-    "Christian Murphy <christian.murphy.42@gmail.com>",
-    "Christoph Werner <christoph@codepunkt.de>",
-    "Danny <dannyharding10@gmail.com>",
-    "Dennis S <denis.s@svsg.co>",
-    "Espen Hovlandsdal <espen@hovlandsdal.com>",
-    "Evan Hensleigh <futuraprime@gmail.com>",
-    "Fabian Irsara <info@fabianirsara.com>",
-    "Florentin Luca Rieger <florentin.rieger@gmail.com>",
-    "Frank <frankieali4@gmail.com>",
-    "Igor Kamyshev <garik.novel@gmail.com>",
-    "Jack Williams <jsw547@gmail.com>",
-    "Jakub Chrzanowski <jakub@chrzanowski.info>",
-    "Jeremy Moseley <jeremy@jeremymoseley.net>",
-    "Jesse Pinho <jesse@jessepinho.com>",
-    "Kelvin Chan <kchan@securitycompass.com>",
-    "Kohei Asai <me@axross.io>",
-    "Linus Unnebäck <linus@folkdatorn.se>",
-    "Marshall Smith <marshall@radialdevgroup.com>",
-    "Nathan Bierema <nbierema@gmail.com>",
-    "Nicolas Venegas <nvenegas@atlassian.com>",
-    "Peng Guanwen <pg999w@outlook.com>",
-    "Petr Gazarov <petrgazarov@gmail.com>",
-    "Phil Rajchgot <tophil@outlook.com>",
-    "Rasmus Eneman <rasmus@eneman.eu>",
-    "René Kooi <renee@kooi.me>",
-    "Riku Rouvila <riku.rouvila@gmail.com>",
-    "Robin Wieruch <wrobin@gmx.net>",
-    "Rostyslav Melnychuk <blackswordgc@gmail.com>",
-    "Ted Piotrowski <tppiotrowski@gmail.com>",
-    "Thibaud Courtoison <do.not.press.enter@gmail.com>",
-    "Thomas Lindstrøm <t@hom.as>",
-    "Tiago Roldão <focus5.6@gmail.com>",
-    "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
-    "cerkiewny <mstarzycki@gmail.com>",
-    "evoye <rosej@gmx.net>",
-    "gRoberts84 <gavin@gav-roberts.co.uk>",
-    "mudrz <mudrz@outlook.com>",
-    "vanchagreen <vanchagreen@gmail.com>"
-  ],
   "dependencies": {
     "@types/hast": "^3.0.0",
     "@types/mdast": "^4.0.0",
@@ -93,10 +47,6 @@
     "index.js",
     "lib/"
   ],
-  "funding": {
-    "type": "opencollective",
-    "url": "https://opencollective.com/unified"
-  },
   "keywords": [
     "ast",
     "commonmark",
@@ -152,6 +102,7 @@
     "strict": true
   },
   "type": "module",
+  "types": "./index.d.ts",
   "version": "0.1.0",
   "xo": {
     "envs": [

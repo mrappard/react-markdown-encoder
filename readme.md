@@ -190,8 +190,10 @@ variation selectors.
 
 This project is forked from
 [`remarkjs/react-markdown`][react-markdown], which is MIT licensed.
-The original project authors and contributors are listed in `package.json`, and
-the historical upstream changelog is retained in `changelog.md`.
+The upstream project’s historical changelog is retained in `changelog.md` for
+provenance and compatibility context.
+Package metadata for this fork reflects `react-markdown-encoder` as a new
+library.
 
 ## License
 
