@@ -168,9 +168,19 @@ The encoder builds a hidden payload block containing:
 
 Each hidden byte is represented as a Unicode variation selector appended to a
 visible character.
+Each block-level element, such as a paragraph, heading, list item or table
+cell, is one carrier.
+Its carrier text includes the text of its inline descendants (`strong`, `em`,
+`a`, `code` and so on), which are not encoded separately.
 Because one hidden byte needs one visible carrier character, an element must
-have enough direct visible text to hold the complete block.
-If it does not, the element is skipped.
+have enough visible text to hold the complete block.
+If it does not, or its text is only whitespace, the element is skipped.
+
+The block is repeated across all of an element’s visible text, so any excerpt
+of at least `2 * blockLength - 1` visible characters contains one complete
+block.
+The block length is the payload’s UTF-8 byte length plus 11.
+This matches VSRMark’s `encodeRepeated`.
 
 Existing variation selectors in a text node are stripped before the current
 payload is encoded, which keeps repeated renders from stacking hidden data.

@@ -4,6 +4,17 @@
 
 All notable changes will be documented in this file.
 
+## react-markdown-encoder 0.1.2
+
+* Repeat the hidden block across each element’s visible text, so excerpts that
+  do not start at the beginning of an element still carry it.
+* Encode each block-level element’s text together with the text of its inline
+  descendants (`strong`, `em`, `a`, `code`, …), so formatting no longer breaks
+  up the watermark.
+  Inline elements are no longer encoded on their own.
+* Skip elements whose text is only whitespace.
+* Export `recoverHiddenText`.
+
 ## react-markdown-encoder 0.1.1 - 2026-05-20
 
 * Fork from [`remarkjs/react-markdown`](https://github.com/remarkjs/react-markdown)

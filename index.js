@@ -12,5 +12,6 @@ export {
   MarkdownEncoderAsync,
   MarkdownEncoderHooks,
   MarkdownEncoder as default,
-  defaultUrlTransform
+  defaultUrlTransform,
+  recoverHiddenText
 } from './lib/index.js'

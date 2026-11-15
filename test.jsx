@@ -1,4 +1,3 @@
-/* eslint-disable no-bitwise */
 /* @jsxRuntime automatic @jsxImportSource react */
 /**
  * @import {Root} from 'hast'
@@ -32,122 +31,11 @@ import remarkToc from 'remark-toc'
 import {visit} from 'unist-util-visit'
 import MarkdownEncoder, {
   MarkdownEncoderAsync,
-  MarkdownEncoderHooks
+  MarkdownEncoderHooks,
+  recoverHiddenText
 } from './index.js'
 
 const decoder = new TextDecoder()
-
-/**
- * @param {string} text
- *   Text.
- * @returns {string | undefined}
- *   Hidden text.
- */
-function recoverHiddenText(text) {
-  const bytes = extractHiddenBytes(text)
-  const minimumLength = 11
-
-  for (let start = 0; start <= bytes.length - minimumLength; start++) {
-    if (
-      bytes[start] !== 0x56 ||
-      bytes[start + 1] !== 0x53 ||
-      bytes[start + 2] !== 0x52 ||
-      bytes[start + 3] !== 0x31 ||
-      bytes[start + 4] !== 1
-    ) {
-      continue
-    }
-
-    const payloadLength = (bytes[start + 5] << 8) | bytes[start + 6]
-    const payloadStart = start + 7
-    const payloadEnd = payloadStart + payloadLength
-    const blockEnd = payloadEnd + 4
-
-    if (blockEnd > bytes.length) continue
-
-    const expectedCrc =
-      ((bytes[payloadEnd] << 24) >>> 0) |
-      (bytes[payloadEnd + 1] << 16) |
-      (bytes[payloadEnd + 2] << 8) |
-      bytes[payloadEnd + 3]
-    const actualCrc = crc32(bytes.slice(start, payloadEnd))
-
-    if (expectedCrc >>> 0 === actualCrc) {
-      return decoder.decode(bytes.slice(payloadStart, payloadEnd))
-    }
-  }
-}
-
-/**
- * @param {string} text
- *   Text.
- * @returns {Uint8Array}
- *   Hidden bytes.
- */
-function extractHiddenBytes(text) {
-  const codePoints = Array.from(text, function (character) {
-    return character.codePointAt(0)
-  })
-  /** @type {Array<number>} */
-  const bytes = []
-
-  for (let index = 0; index < codePoints.length - 1; index++) {
-    const byte = variationSelectorToByte(codePoints[index + 1])
-
-    if (byte !== undefined) {
-      bytes.push(byte)
-      index++
-    }
-  }
-
-  return Uint8Array.from(bytes)
-}
-
-/**
- * @param {number | undefined} codePoint
- *   Code point.
- * @returns {number | undefined}
- *   Byte.
- */
-function variationSelectorToByte(codePoint) {
-  if (codePoint === undefined) return
-
-  if (codePoint >= 0xfe_00 && codePoint <= 0xfe_0f) {
-    return codePoint - 0xfe_00
-  }
-
-  if (codePoint >= 0xe_01_00 && codePoint <= 0xe_01_ef) {
-    return 16 + (codePoint - 0xe_01_00)
-  }
-}
-
-const testCrc32Table = new Uint32Array(256)
-
-for (let index = 0; index < testCrc32Table.length; index++) {
-  let value = index
-
-  for (let bit = 0; bit < 8; bit++) {
-    value = value & 1 ? 0xed_b8_83_20 ^ (value >>> 1) : value >>> 1
-  }
-
-  testCrc32Table[index] = value >>> 0
-}
-
-/**
- * @param {Uint8Array} bytes
- *   Bytes.
- * @returns {number}
- *   CRC32.
- */
-function crc32(bytes) {
-  let crc = 0xff_ff_ff_ff
-
-  for (const byte of bytes) {
-    crc = testCrc32Table[(crc ^ byte) & 0xff] ^ (crc >>> 8)
-  }
-
-  return (crc ^ 0xff_ff_ff_ff) >>> 0
-}
 
 /**
  * @param {Array<number>} bytes
@@ -175,7 +63,8 @@ test('react-markdown-encoder (core)', async function (t) {
       'MarkdownEncoderAsync',
       'MarkdownEncoderHooks',
       'default',
-      'defaultUrlTransform'
+      'defaultUrlTransform',
+      'recoverHiddenText'
     ])
   })
 })
@@ -196,6 +85,77 @@ test('MarkdownEncoder', async function (t) {
     )
 
     assert.equal(recoverHiddenText(markup), 'secret')
+  })
+
+  await t.test('should repeat hidden text across long elements', function () {
+    const markdown =
+      'This paragraph has enough visible carrier text for the hidden payload.'
+    const markup = renderToStaticMarkup(
+      <MarkdownEncoder children={markdown} text="secret" />
+    )
+    const characters = Array.from(markup.slice(3, -4))
+    // A 17-byte block needs 33 visible characters; skip the first 20.
+    const excerpt = characters.slice(40, 106).join('')
+
+    assert.equal(characters.length, markdown.length * 2)
+    assert.equal(recoverHiddenText(excerpt), 'secret')
+  })
+
+  await t.test(
+    'should carry inline text in the block element’s watermark',
+    function () {
+      const markdown =
+        'Short **bold words** then a [link](https://example.com) and more plain text after it.'
+      const markup = renderToStaticMarkup(
+        <MarkdownEncoder children={markdown} text="secret" />
+      )
+      const characters = Array.from(markup.replaceAll(/<[^>]+>/g, ''))
+      // Skip `Short ` so the excerpt starts mid-block and spans the inline text.
+      const excerpt = characters.slice(12).join('')
+
+      assert.equal(characters.length, 58 * 2)
+      assert.equal(recoverHiddenText(excerpt), 'secret')
+    }
+  )
+
+  await t.test('should not encode inline elements separately', function () {
+    const markdown =
+      '**This bold text alone is long enough to carry the block.**'
+    const markup = renderToStaticMarkup(
+      <MarkdownEncoder children={markdown} text="secret" />
+    )
+    const characters = Array.from(markup.replaceAll(/<[^>]+>/g, ''))
+
+    // Every visible character carries exactly one selector, not two.
+    assert.equal(characters.length, (markdown.length - 4) * 2)
+    assert.equal(recoverHiddenText(markup), 'secret')
+  })
+
+  await t.test(
+    'should encode inline elements without a block ancestor',
+    function () {
+      const markup = renderToStaticMarkup(
+        <MarkdownEncoder
+          allowedElements={['strong']}
+          children="**This bold text alone is long enough to carry the block.**"
+          text="secret"
+          unwrapDisallowed
+        />
+      )
+
+      assert.equal(recoverHiddenText(markup), 'secret')
+    }
+  )
+
+  await t.test('should skip elements with only whitespace text', function () {
+    const markdown = Array.from({length: 50}, function () {
+      return '- a'
+    }).join('\n')
+    const markup = renderToStaticMarkup(
+      <MarkdownEncoder children={markdown} text="secret" />
+    )
+
+    assert.doesNotMatch(markup, /[︀-️\u{E0100}-\u{E01EF}]/u)
   })
 
   await t.test(
@@ -248,7 +208,6 @@ test('MarkdownEncoder', async function (t) {
   await t.test(
     'should ignore invalid hidden data in test recovery',
     function () {
-      assert.equal(variationSelectorToByte(undefined), undefined)
       assert.equal(
         recoverHiddenText(hideBytes(Array.from({length: 11}).fill(0))),
         undefined
@@ -259,6 +218,55 @@ test('MarkdownEncoder', async function (t) {
         ),
         undefined
       )
+    }
+  )
+
+  await t.test('should encode a single-character secret', function () {
+    const markdown =
+      'This paragraph has enough visible carrier text for the hidden payload.'
+    const markup = renderToStaticMarkup(
+      <MarkdownEncoder children={markdown} text="x" />
+    )
+
+    assert.equal(recoverHiddenText(markup), 'x')
+  })
+
+  await t.test(
+    'should encode a secret with spaces and punctuation',
+    function () {
+      const markdown =
+        'This is a longer paragraph with substantially more visible carrier text to accommodate a larger hidden payload message here.'
+      const markup = renderToStaticMarkup(
+        <MarkdownEncoder children={markdown} text="hello, world!" />
+      )
+
+      assert.equal(recoverHiddenText(markup), 'hello, world!')
+    }
+  )
+
+  await t.test(
+    'should encode a unicode (multi-byte UTF-8) secret',
+    function () {
+      const markdown =
+        'This paragraph has enough visible carrier text for the hidden payload with some extra characters included here for good measure.'
+      const markup = renderToStaticMarkup(
+        <MarkdownEncoder children={markdown} text="héllo wörld" />
+      )
+
+      assert.equal(recoverHiddenText(markup), 'héllo wörld')
+    }
+  )
+
+  await t.test(
+    'should encode into a heading with enough carrier text',
+    function () {
+      const markdown =
+        '# This heading has enough visible carrier text for the payload'
+      const markup = renderToStaticMarkup(
+        <MarkdownEncoder children={markdown} text="secret" />
+      )
+
+      assert.equal(recoverHiddenText(markup), 'secret')
     }
   )
 
@@ -1334,6 +1342,27 @@ test('MarkdownEncoderAsync', async function (t) {
   })
 
   await t.test(
+    'should encode hidden text with `MarkdownEncoderAsync`',
+    async function () {
+      const markdown =
+        'This paragraph has enough visible carrier text for the hidden payload.'
+
+      return new Promise(function (resolve, reject) {
+        renderToPipeableStream(
+          <MarkdownEncoderAsync children={markdown} text="secret" />
+        )
+          .pipe(
+            concatStream({encoding: 'u8'}, function (data) {
+              assert.equal(recoverHiddenText(decoder.decode(data)), 'secret')
+              resolve()
+            })
+          )
+          .on('error', reject)
+      })
+    }
+  )
+
+  await t.test(
     'should support async plugins w/ `MarkdownEncoderAsync` (`rehype-starry-night`)',
     async function () {
       return new Promise(function (resolve) {
@@ -1398,6 +1427,32 @@ test('MarkdownEncoderHooks', async function (t) {
         result.container.innerHTML,
         '<pre><code class="language-js"><span class="pl-en">console</span>.<span class="pl-c1">log</span>(<span class="pl-c1">3.14</span>)\n</code></pre>'
       )
+    }
+  )
+
+  await t.test(
+    'should encode hidden text with `MarkdownEncoderHooks`',
+    async function () {
+      const plugin = deferPlugin()
+      const result = render(
+        <MarkdownEncoderHooks
+          children={
+            'This paragraph has enough visible carrier text for the hidden payload.'
+          }
+          text="secret"
+          rehypePlugins={[plugin.plugin]}
+        />
+      )
+
+      assert.equal(result.container.innerHTML, '')
+
+      plugin.resolve()
+
+      await waitFor(function () {
+        assert.notEqual(result.container.innerHTML, '')
+      })
+
+      assert.equal(recoverHiddenText(result.container.innerHTML), 'secret')
     }
   )
 
