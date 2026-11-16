@@ -94,6 +94,7 @@ This package exports:
 * `MarkdownEncoderAsync`
 * `MarkdownEncoderHooks`
 * `defaultUrlTransform`
+* `recoverHiddenText`
 
 The default export is `MarkdownEncoder`.
 
@@ -133,6 +134,23 @@ Client-side hooks component for async plugins.
 ```js
 import {MarkdownEncoderHooks} from 'react-markdown-encoder'
 ```
+
+### `recoverHiddenText(text)`
+
+Recovers hidden text from rendered output, such as HTML or text copied from
+the page.
+Returns the payload of the first complete, valid block, or `undefined` if there
+is none.
+
+```js
+import {recoverHiddenText} from 'react-markdown-encoder'
+
+recoverHiddenText(document.querySelector('article').textContent)
+// => 'hidden payload'
+```
+
+Any excerpt of at least `2 * blockLength - 1` characters from one element
+contains a complete block (see [Encoding Behavior](#encoding-behavior)).
 
 ### Options
 
